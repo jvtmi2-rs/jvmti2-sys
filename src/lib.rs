@@ -5,15 +5,15 @@ use core::ffi::{c_char, c_uchar, c_uint, c_void};
 
 use bitflags::bitflags;
 use jni_sys::{
-    JNIEnv, JNINativeInterface_, jboolean, jchar, jclass, jdouble, jfieldID, jfloat, jint, jlong,
-    jmethodID, jobject, jvalue,
+    jboolean, jchar, jclass, jdouble, jfieldID, jfloat, jint, jlong, jmethodID, jobject, jvalue,
+    JNIEnv, JNIEnv_, JNINativeInterface_,
 };
+use jni_sys_macros::jni_to_union;
 
 pub const JVMTI_VERSION_1: jint = 0x30010000;
 pub const JVMTI_VERSION_1_0: jint = 0x30010000;
 pub const JVMTI_VERSION_1_1: jint = 0x30010100;
 pub const JVMTI_VERSION_1_2: jint = 0x30010200;
-pub const JVMTI_VERSION: jint = 0x30000000 + (1 * 0x10000) + (2 * 0x100) + 1; /* version: 1.2.1 */
 
 pub type Agent_OnLoad =
     extern "system" fn(vm: *mut JNIEnv, options: *mut c_char, reserved: *mut c_void) -> jint;
@@ -154,6 +154,7 @@ const JVMTI_CLASS_STATUS_INITIALIZED: c_uint = 4;
 const JVMTI_CLASS_STATUS_ERROR: c_uint = 8;
 const JVMTI_CLASS_STATUS_ARRAY: c_uint = 16;
 const JVMTI_CLASS_STATUS_PRIMITIVE: c_uint = 32;
+
 /* Event Enable/Disable */
 #[derive(Clone, Copy, Debug)]
 #[repr(C)]
@@ -252,9 +253,20 @@ pub enum jvmtiJlocationFormat {
 }
 /* Resource Exhaustion Flags */
 
-pub const JVMTI_RESOURCE_EXHAUSTED_OOM_ERROR: c_uint = 0x0001;
-pub const JVMTI_RESOURCE_EXHAUSTED_JAVA_HEAP: c_uint = 0x0002;
-pub const JVMTI_RESOURCE_EXHAUSTED_THREADS: c_uint = 0x0004;
+pub const JVMTI_RESOURCE_EXHAUSTED_OOM_ERROR: jint = 0x0001;
+pub const JVMTI_RESOURCE_EXHAUSTED_JAVA_HEAP: jint = 0x0002;
+pub const JVMTI_RESOURCE_EXHAUSTED_THREADS: jint = 0x0004;
+
+bitflags! {
+    /// Represents the capabilities of the JVMTI agent.
+    #[derive(Clone,  Debug)]
+    #[repr(C)]
+    pub struct JVMTI_RESOURCE_EXHAUSTED_FLAGS: jint {
+        const OOM_ERROR = JVMTI_RESOURCE_EXHAUSTED_OOM_ERROR;
+        const JAVA_HEAP = 0x0002;
+        const THREADS = 0x0004;
+    }
+}
 
 /* Errors */
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -348,7 +360,10 @@ pub enum jvmtiEvent {
     JVMTI_EVENT_GARBAGE_COLLECTION_FINISH = 82,
     JVMTI_EVENT_OBJECT_FREE = 83,
     JVMTI_EVENT_VM_OBJECT_ALLOC = 84,
-    // JVMTI_MAX_EVENT_TYPE_VAL = 84
+    JVMTI_EVENT_SAMPLED_OBJECT_ALLOC = 86,
+    JVMTI_EVENT_VIRTUAL_THREAD_START = 87,
+    JVMTI_EVENT_VIRTUAL_THREAD_END = 88,
+    // JVMTI_MAX_EVENT_TYPE_VAL = 88
 }
 
 pub type jvmtiThreadInfo = _jvmtiThreadInfo;
@@ -375,107 +390,87 @@ pub type jvmtiTimerInfo = _jvmtiTimerInfo;
 pub type jvmtiAddrLocationMap = _jvmtiAddrLocationMap;
 
 pub type jvmtiStartFunction =
-    Option<unsafe extern "C" fn(jvmti_env: *mut jvmtiEnv, jni_env: *mut JNIEnv, arg: *mut c_void)>;
-pub type jvmtiHeapIterationCallback = Option<
-    unsafe extern "C" fn(
-        class_tag: jlong,
-        size: jlong,
-        tag_ptr: *mut jlong,
-        length: jint,
-        user_data: *mut c_void,
-    ) -> jint,
->;
-pub type jvmtiHeapReferenceCallback = Option<
-    unsafe extern "C" fn(
-        reference_kind: jvmtiHeapReferenceKind,
-        reference_info: *const jvmtiHeapReferenceInfo,
-        class_tag: jlong,
-        referrer_class_tag: jlong,
-        size: jlong,
-        tag_ptr: *mut jlong,
-        referrer_tag_ptr: *mut jlong,
-        length: jint,
-        user_data: *mut c_void,
-    ) -> jint,
->;
-pub type jvmtiPrimitiveFieldCallback = Option<
-    unsafe extern "C" fn(
-        kind: jvmtiHeapReferenceKind,
-        info: *const jvmtiHeapReferenceInfo,
-        object_class_tag: jlong,
-        object_tag_ptr: *mut jlong,
-        value: jvalue,
-        value_type: jvmtiPrimitiveType,
-        user_data: *mut c_void,
-    ) -> jint,
->;
-pub type jvmtiArrayPrimitiveValueCallback = Option<
-    unsafe extern "C" fn(
-        class_tag: jlong,
-        size: jlong,
-        tag_ptr: *mut jlong,
-        element_count: jint,
-        element_type: jvmtiPrimitiveType,
-        elements: *mut c_void,
-        user_data: *mut c_void,
-    ) -> jint,
->;
-pub type jvmtiStringPrimitiveValueCallback = Option<
-    unsafe extern "C" fn(
-        class_tag: jlong,
-        size: jlong,
-        tag_ptr: *mut jlong,
-        value: *mut jchar,
-        value_length: jint,
-        user_data: *mut c_void,
-    ) -> jint,
->;
-pub type jvmtiReservedCallback = Option<unsafe extern "C" fn() -> jint>;
-pub type jvmtiHeapObjectCallback = Option<
-    unsafe extern "C" fn(
-        class_tag: jlong,
-        size: jlong,
-        tag_ptr: *mut jlong,
-        user_data: *mut c_void,
-    ) -> jvmtiIterationControl,
->;
-pub type jvmtiHeapRootCallback = Option<
-    unsafe extern "C" fn(
-        root_kind: jvmtiHeapRootKind,
-        class_tag: jlong,
-        size: jlong,
-        tag_ptr: *mut jlong,
-        user_data: *mut c_void,
-    ) -> jvmtiIterationControl,
->;
-pub type jvmtiStackReferenceCallback = Option<
-    unsafe extern "C" fn(
-        root_kind: jvmtiHeapRootKind,
-        class_tag: jlong,
-        size: jlong,
-        tag_ptr: *mut jlong,
-        thread_tag: jlong,
-        depth: jint,
-        method: jmethodID,
-        slot: jint,
-        user_data: *mut c_void,
-    ) -> jvmtiIterationControl,
->;
-pub type jvmtiObjectReferenceCallback = Option<
-    unsafe extern "C" fn(
-        reference_kind: jvmtiObjectReferenceKind,
-        class_tag: jlong,
-        size: jlong,
-        tag_ptr: *mut jlong,
-        referrer_tag: jlong,
-        referrer_index: jint,
-        user_data: *mut c_void,
-    ) -> jvmtiIterationControl,
->;
-pub type jvmtiExtensionFunction =
-    Option<unsafe extern "C" fn(jvmti_env: *mut jvmtiEnv, ...) -> jvmtiError>;
-pub type jvmtiExtensionEvent =
-    Option<unsafe extern "C" fn(jvmti_env: *mut jvmtiEnv, ...) -> jvmtiError>;
+    unsafe extern "system" fn(jvmti_env: *mut jvmtiEnv, jni_env: *mut JNIEnv, arg: *mut c_void);
+pub type jvmtiHeapIterationCallback = unsafe extern "system" fn(
+    class_tag: jlong,
+    size: jlong,
+    tag_ptr: *mut jlong,
+    length: jint,
+    user_data: *mut c_void,
+) -> jint;
+pub type jvmtiHeapReferenceCallback = unsafe extern "system" fn(
+    reference_kind: jvmtiHeapReferenceKind,
+    reference_info: *const jvmtiHeapReferenceInfo,
+    class_tag: jlong,
+    referrer_class_tag: jlong,
+    size: jlong,
+    tag_ptr: *mut jlong,
+    referrer_tag_ptr: *mut jlong,
+    length: jint,
+    user_data: *mut c_void,
+) -> jint;
+pub type jvmtiPrimitiveFieldCallback = unsafe extern "system" fn(
+    kind: jvmtiHeapReferenceKind,
+    info: *const jvmtiHeapReferenceInfo,
+    object_class_tag: jlong,
+    object_tag_ptr: *mut jlong,
+    value: jvalue,
+    value_type: jvmtiPrimitiveType,
+    user_data: *mut c_void,
+) -> jint;
+pub type jvmtiArrayPrimitiveValueCallback = unsafe extern "system" fn(
+    class_tag: jlong,
+    size: jlong,
+    tag_ptr: *mut jlong,
+    element_count: jint,
+    element_type: jvmtiPrimitiveType,
+    elements: *mut c_void,
+    user_data: *mut c_void,
+) -> jint;
+pub type jvmtiStringPrimitiveValueCallback = unsafe extern "system" fn(
+    class_tag: jlong,
+    size: jlong,
+    tag_ptr: *mut jlong,
+    value: *mut jchar,
+    value_length: jint,
+    user_data: *mut c_void,
+) -> jint;
+pub type jvmtiReservedCallback = unsafe extern "system" fn() -> jint;
+pub type jvmtiHeapObjectCallback = unsafe extern "system" fn(
+    class_tag: jlong,
+    size: jlong,
+    tag_ptr: *mut jlong,
+    user_data: *mut c_void,
+) -> jvmtiIterationControl;
+pub type jvmtiHeapRootCallback = unsafe extern "system" fn(
+    root_kind: jvmtiHeapRootKind,
+    class_tag: jlong,
+    size: jlong,
+    tag_ptr: *mut jlong,
+    user_data: *mut c_void,
+) -> jvmtiIterationControl;
+pub type jvmtiStackReferenceCallback = unsafe extern "system" fn(
+    root_kind: jvmtiHeapRootKind,
+    class_tag: jlong,
+    size: jlong,
+    tag_ptr: *mut jlong,
+    thread_tag: jlong,
+    depth: jint,
+    method: jmethodID,
+    slot: jint,
+    user_data: *mut c_void,
+) -> jvmtiIterationControl;
+pub type jvmtiObjectReferenceCallback = unsafe extern "system" fn(
+    reference_kind: jvmtiObjectReferenceKind,
+    class_tag: jlong,
+    size: jlong,
+    tag_ptr: *mut jlong,
+    referrer_tag: jlong,
+    referrer_index: jint,
+    user_data: *mut c_void,
+) -> jvmtiIterationControl;
+pub type jvmtiExtensionFunction = unsafe extern "C" fn(jvmti_env: *mut jvmtiEnv, ...) -> jvmtiError;
+pub type jvmtiExtensionEvent = unsafe extern "C" fn(jvmti_env: *mut jvmtiEnv, ...) -> jvmtiError;
 
 #[derive(Clone, Copy, Debug)]
 #[repr(C)]
@@ -749,1216 +744,1246 @@ bitflags! {
         const CAN_RETRANSFORM_ANY_CLASS = 1 << 38;
         const CAN_GENERATE_RESOURCE_EXHAUSTION_HEAP_EVENTS = 1 << 39;
         const CAN_GENERATE_RESOURCE_EXHAUSTION_THREADS_EVENTS = 1 << 40;
+        // TODO: Think how to represent new fields better
+        const CAN_GENERATE_EARLY_VMSTART = 1 << 41;
+        const CAN_GENERATE_EARLY_CLASS_HOOK_EVENTS = 1 << 42;
+        const CAN_GENERATE_SAMPLED_OBJECT_ALLOC_EVENTS = 1 << 43;
+        const CAN_SUPPORT_VIRTUAL_THREADS = 1 << 44;
+
     }
 }
 
 /* Event Definitions */
 
-pub type jvmtiEventReserved = Option<extern "C" fn()>;
-pub type jvmtiEventBreakpoint = Option<
-    unsafe extern "C" fn(
-        jvmti_env: *mut jvmtiEnv,
-        jni_env: *mut JNIEnv,
-        thread: jthread,
-        method: jmethodID,
-        location: jlocation,
-    ),
->;
-pub type jvmtiEventClassFileLoadHook = Option<
-    unsafe extern "C" fn(
-        jvmti_env: *mut jvmtiEnv,
-        jni_env: *mut JNIEnv,
-        // TODO: Check if it's an option actually
-        // https://docs.oracle.com/javase/8/docs/platform/jvmti/jvmti.html#ClassFileLoadHook
-        class_being_redefined: jclass, 
-        loader: jobject,
-        name: *const c_char,
-        protection_domain: jobject,
-        class_data_len: jint,
-        class_data: *const c_uchar,
-        new_class_data_len: *mut jint,
-        new_class_data: *mut *mut c_uint,
-    ),
->;
+pub type jvmtiEventReserved = extern "system" fn();
+pub type jvmtiEventBreakpoint = unsafe extern "system" fn(
+    jvmti_env: *mut jvmtiEnv,
+    jni_env: *mut JNIEnv,
+    thread: jthread,
+    method: jmethodID,
+    location: jlocation,
+);
 
-pub type jvmtiEventClassLoad = Option<
-    unsafe extern "C" fn(
-        jvmti_env: *mut jvmtiEnv,
-        jni_env: *mut JNIEnv,
-        thread: jthread,
-        klass: jclass,
-    ),
->;
+pub type jvmtiEventClassFileLoadHook = unsafe extern "system" fn(
+    jvmti_env: *mut jvmtiEnv,
+    jni_env: *mut JNIEnv,
+    class_being_redefined: jclass,
+    loader: jobject,
+    name: *const c_char,
+    protection_domain: jobject,
+    class_data_len: jint,
+    class_data: *const c_uchar,
+    new_class_data_len: *mut jint,
+    new_class_data: *mut *mut c_uint,
+);
 
-pub type jvmtiEventClassPrepare = Option<
-    unsafe extern "C" fn(
-        jvmti_env: *mut jvmtiEnv,
-        jni_env: *mut JNIEnv,
-        thread: jthread,
-        klass: jclass,
-    ),
->;
+pub type jvmtiEventClassLoad = unsafe extern "system" fn(
+    jvmti_env: *mut jvmtiEnv,
+    jni_env: *mut JNIEnv,
+    thread: jthread,
+    klass: jclass,
+);
 
-pub type jvmtiEventCompiledMethodLoad = Option<
-    unsafe extern "C" fn(
-        jvmti_env: *mut jvmtiEnv,
-        jni_env: *mut JNIEnv,
-        code_size: jint,
-        code_addr: *const c_void,
-        map_length: jint,
-        map: *const jvmtiAddrLocationMap,
-        compile_info: *const c_void,
-    ),
->;
+pub type jvmtiEventClassPrepare = unsafe extern "system" fn(
+    jvmti_env: *mut jvmtiEnv,
+    jni_env: *mut JNIEnv,
+    thread: jthread,
+    klass: jclass,
+);
 
-pub type jvmtiEventCompiledMethodUnload = Option<
-    unsafe extern "C" fn(jvmti_env: *mut jvmtiEnv, method: jmethodID, code_addr: *const c_void),
->;
+pub type jvmtiEventCompiledMethodLoad = unsafe extern "system" fn(
+    jvmti_env: *mut jvmtiEnv,
+    jni_env: *mut JNIEnv,
+    code_size: jint,
+    code_addr: *const c_void,
+    map_length: jint,
+    map: *const jvmtiAddrLocationMap,
+    compile_info: *const c_void,
+);
 
-pub type jvmtiEventDataDumpRequest = Option<unsafe extern "C" fn(jvmti_env: *mut jvmtiEnv)>;
+pub type jvmtiEventCompiledMethodUnload = unsafe extern "system" fn(
+    jvmti_env: *mut jvmtiEnv,
+    method: jmethodID,
+    code_addr: *const c_void,
+);
 
-pub type jvmtiEventDynamicCodeGenerated = Option<
-    unsafe extern "C" fn(
-        jvmti_env: *mut jvmtiEnv,
-        name: *const c_char,
-        address: *const c_void,
-        length: jint,
-    ),
->;
+pub type jvmtiEventDataDumpRequest = unsafe extern "system" fn(jvmti_env: *mut jvmtiEnv);
 
-pub type jvmtiEventException = Option<
-    unsafe extern "C" fn(
-        jvmti_env: *mut jvmtiEnv,
-        jni_env: *mut JNIEnv,
-        thread: jthread,
-        method: jmethodID,
-        location: jlocation,
-        exception: jobject,
-        catch_method: jmethodID,
-        catch_location: jlocation,
-    ),
->;
+pub type jvmtiEventDynamicCodeGenerated = unsafe extern "system" fn(
+    jvmti_env: *mut jvmtiEnv,
+    name: *const c_char,
+    address: *const c_void,
+    length: jint,
+);
 
-pub type jvmtiEventExceptionCatch = Option<
-    unsafe extern "C" fn(
-        jvmti_env: *mut jvmtiEnv,
-        jni_env: *mut JNIEnv,
-        thread: jthread,
-        method: jmethodID,
-        location: jlocation,
-        exception: jobject,
-    ),
->;
+pub type jvmtiEventException = unsafe extern "system" fn(
+    jvmti_env: *mut jvmtiEnv,
+    jni_env: *mut JNIEnv,
+    thread: jthread,
+    method: jmethodID,
+    location: jlocation,
+    exception: jobject,
+    catch_method: jmethodID,
+    catch_location: jlocation,
+);
 
-pub type jvmtiEventFieldAccess = Option<
-    unsafe extern "C" fn(
-        jvmti_env: *mut jvmtiEnv,
-        jni_env: *mut JNIEnv,
-        thread: jthread,
-        method: jmethodID,
-        location: jlocation,
-        field_klass: jclass,
-        object: jobject,
-        field: jfieldID,
-    ),
->;
+pub type jvmtiEventExceptionCatch = unsafe extern "system" fn(
+    jvmti_env: *mut jvmtiEnv,
+    jni_env: *mut JNIEnv,
+    thread: jthread,
+    method: jmethodID,
+    location: jlocation,
+    exception: jobject,
+);
 
-pub type jvmtiEventFieldModification = Option<
-    unsafe extern "C" fn(
-        jvmti_env: *mut jvmtiEnv,
-        jni_env: *mut JNIEnv,
-        thread: jthread,
-        method: jmethodID,
-        location: jlocation,
-        field_klass: jclass,
-        object: jobject,
-        field: jfieldID,
-        signature_type: c_char,
-        new_value: jvalue,
-    ),
->;
+pub type jvmtiEventFieldAccess = unsafe extern "system" fn(
+    jvmti_env: *mut jvmtiEnv,
+    jni_env: *mut JNIEnv,
+    thread: jthread,
+    method: jmethodID,
+    location: jlocation,
+    field_klass: jclass,
+    object: jobject,
+    field: jfieldID,
+);
 
-pub type jvmtiEventFramePop = Option<
-    unsafe extern "C" fn(
-        jvmti_env: *mut jvmtiEnv,
-        jni_env: *mut JNIEnv,
-        thread: jthread,
-        method: jmethodID,
-        was_popped_by_exception: jboolean,
-    ),
->;
+pub type jvmtiEventFieldModification = unsafe extern "system" fn(
+    jvmti_env: *mut jvmtiEnv,
+    jni_env: *mut JNIEnv,
+    thread: jthread,
+    method: jmethodID,
+    location: jlocation,
+    field_klass: jclass,
+    object: jobject,
+    field: jfieldID,
+    signature_type: c_char,
+    new_value: jvalue,
+);
 
-pub type jvmtiEventGarbageCollectionFinish = Option<unsafe extern "C" fn(jvmti_env: *mut jvmtiEnv)>;
-pub type jvmtiEventGarbageCollectionStart = Option<unsafe extern "C" fn(jvmti_env: *mut jvmtiEnv)>;
-pub type jvmtiEventMethodEntry = Option<
-    unsafe extern "C" fn(
-        jvmti_env: *mut jvmtiEnv,
-        jni_env: *mut JNIEnv,
-        thread: jthread,
-        method: jmethodID,
-    ),
->;
+pub type jvmtiEventFramePop = unsafe extern "system" fn(
+    jvmti_env: *mut jvmtiEnv,
+    jni_env: *mut JNIEnv,
+    thread: jthread,
+    method: jmethodID,
+    was_popped_by_exception: jboolean,
+);
 
-pub type jvmtiEventMethodExit = Option<
-    unsafe extern "C" fn(
-        jvmti_env: *mut jvmtiEnv,
-        jni_env: *mut JNIEnv,
-        thread: jthread,
-        method: jmethodID,
-        was_popped_by_exception: jboolean,
-        return_value: jvalue,
-    ),
->;
+pub type jvmtiEventGarbageCollectionFinish = unsafe extern "system" fn(jvmti_env: *mut jvmtiEnv);
+pub type jvmtiEventGarbageCollectionStart = unsafe extern "system" fn(jvmti_env: *mut jvmtiEnv);
+pub type jvmtiEventMethodEntry = unsafe extern "system" fn(
+    jvmti_env: *mut jvmtiEnv,
+    jni_env: *mut JNIEnv,
+    thread: jthread,
+    method: jmethodID,
+);
 
-pub type jvmtiEventMonitorContendedEnter = Option<
-    unsafe extern "C" fn(
-        jvmti_env: *mut jvmtiEnv,
-        jni_env: *mut JNIEnv,
-        thread: jthread,
-        object: jobject,
-    ),
->;
+pub type jvmtiEventMethodExit = unsafe extern "system" fn(
+    jvmti_env: *mut jvmtiEnv,
+    jni_env: *mut JNIEnv,
+    thread: jthread,
+    method: jmethodID,
+    was_popped_by_exception: jboolean,
+    return_value: jvalue,
+);
 
-pub type jvmtiEventMonitorContendedEntered = Option<
-    unsafe extern "C" fn(
-        jvmti_env: *mut jvmtiEnv,
-        jni_env: *mut JNIEnv,
-        thread: jthread,
-        object: jobject,
-    ),
->;
-pub type jvmtiEventMonitorWait = Option<
-    unsafe extern "C" fn(
-        jvmti_env: *mut jvmtiEnv,
-        jni_env: *mut JNIEnv,
-        thread: jthread,
-        object: jobject,
-        timeout: jlong,
-    ),
->;
+pub type jvmtiEventMonitorContendedEnter = unsafe extern "system" fn(
+    jvmti_env: *mut jvmtiEnv,
+    jni_env: *mut JNIEnv,
+    thread: jthread,
+    object: jobject,
+);
 
-pub type jvmtiEventMonitorWaited = Option<
-    unsafe extern "C" fn(
-        jvmti_env: *mut jvmtiEnv,
-        jni_env: *mut JNIEnv,
-        thread: jthread,
-        object: jobject,
-        timed_out: jboolean,
-    ),
->;
+pub type jvmtiEventMonitorContendedEntered = unsafe extern "system" fn(
+    jvmti_env: *mut jvmtiEnv,
+    jni_env: *mut JNIEnv,
+    thread: jthread,
+    object: jobject,
+);
+pub type jvmtiEventMonitorWait = unsafe extern "system" fn(
+    jvmti_env: *mut jvmtiEnv,
+    jni_env: *mut JNIEnv,
+    thread: jthread,
+    object: jobject,
+    timeout: jlong,
+);
 
-pub type jvmtiEventNativeMethodBind = Option<
-    unsafe extern "C" fn(
-        jvmti_env: *mut jvmtiEnv,
-        jni_env: *mut JNIEnv,
-        thread: jthread,
-        method: *mut c_void,
-        address: *mut c_void,
-        new_address_ptr: *mut *mut c_void,
-    ),
->;
+pub type jvmtiEventMonitorWaited = unsafe extern "system" fn(
+    jvmti_env: *mut jvmtiEnv,
+    jni_env: *mut JNIEnv,
+    thread: jthread,
+    object: jobject,
+    timed_out: jboolean,
+);
 
-pub type jvmtiEventObjectFree = Option<unsafe extern "C" fn(jvmti_env: *mut jvmtiEnv, tag: jlong)>;
-pub type jvmtiEventResourceExhausted = Option<
-    unsafe extern "C" fn(
-        jvmti_env: *mut jvmtiEnv,
-        jni_env: *mut JNIEnv,
-        // TODO: Maybe add bitflags in the wrapper crate?
-        flags: jint,
-        reserved: *const c_void,
-        description: *const c_char,
-    ),
->;
+pub type jvmtiEventNativeMethodBind = unsafe extern "system" fn(
+    jvmti_env: *mut jvmtiEnv,
+    jni_env: *mut JNIEnv,
+    thread: jthread,
+    method: *mut c_void,
+    address: *mut c_void,
+    new_address_ptr: *mut *mut c_void,
+);
 
-pub type jvmtiEventSingleStep = Option<
-    unsafe extern "C" fn(
-        jvmti_env: *mut jvmtiEnv,
-        jni_env: *mut JNIEnv,
-        thread: jthread,
-        method: jmethodID,
-        location: jlocation,
-    ),
->;
+pub type jvmtiEventObjectFree = unsafe extern "system" fn(jvmti_env: *mut jvmtiEnv, tag: jlong);
+pub type jvmtiEventResourceExhausted = unsafe extern "system" fn(
+    jvmti_env: *mut jvmtiEnv,
+    jni_env: *mut JNIEnv,
+    flags: JVMTI_RESOURCE_EXHAUSTED_FLAGS,
+    reserved: *const c_void,
+    description: *const c_char,
+);
+
+pub type jvmtiEventSampledObjectAlloc = unsafe extern "system" fn(
+    jvmti_env: *mut jvmtiEnv,
+    jni_env: *mut JNIEnv,
+    thread: jthread,
+    object: jobject,
+    object_class: jclass,
+    size: jlong,
+);
+
+pub type jvmtiEventSingleStep = unsafe extern "system" fn(
+    jvmti_env: *mut jvmtiEnv,
+    jni_env: *mut JNIEnv,
+    thread: jthread,
+    method: jmethodID,
+    location: jlocation,
+);
 
 pub type jvmtiEventThreadEnd =
-    Option<unsafe extern "C" fn(jvmti_env: *mut jvmtiEnv, jni_env: *mut JNIEnv, thread: jthread)>;
+    unsafe extern "system" fn(jvmti_env: *mut jvmtiEnv, jni_env: *mut JNIEnv, thread: jthread);
 
 pub type jvmtiEventThreadStart =
-    Option<unsafe extern "C" fn(jvmti_env: *mut jvmtiEnv, jni_env: *mut JNIEnv, thread: jthread)>;
+    unsafe extern "system" fn(jvmti_env: *mut jvmtiEnv, jni_env: *mut JNIEnv, thread: jthread);
+
+pub type jvmtiEventVirtualThreadStart =
+    unsafe extern "system" fn(jvmti_env: *mut jvmtiEnv, jni_env: *mut JNIEnv, thread: jthread);
+
+pub type jvmtiEventVirtualThreadEnd =
+    unsafe extern "system" fn(jvmti_env: *mut jvmtiEnv, jni_env: *mut JNIEnv, thread: jthread);
 
 pub type jvmtiEventVMDeath =
-    Option<unsafe extern "C" fn(jvmti_env: *mut jvmtiEnv, jni_env: *mut JNIEnv)>;
+    unsafe extern "system" fn(jvmti_env: *mut jvmtiEnv, jni_env: *mut JNIEnv);
 
 pub type jvmtiEventVMInit =
-    Option<unsafe extern "C" fn(jvmti_env: *mut jvmtiEnv, jni_env: *mut JNIEnv, thread: jthread)>;
+    unsafe extern "system" fn(jvmti_env: *mut jvmtiEnv, jni_env: *mut JNIEnv, thread: jthread);
 
-pub type jvmtiEventVMObjectAlloc = Option<
-    unsafe extern "C" fn(
-        jvmti_env: *mut jvmtiEnv,
-        jni_env: *mut JNIEnv,
-        thread: jthread,
-        object: jobject,
-        object_klass: jclass,
-        size: jlong,
-    ),
->;
+pub type jvmtiEventVMObjectAlloc = unsafe extern "system" fn(
+    jvmti_env: *mut jvmtiEnv,
+    jni_env: *mut JNIEnv,
+    thread: jthread,
+    object: jobject,
+    object_klass: jclass,
+    size: jlong,
+);
 
 pub type jvmtiEventVMStart =
-    Option<unsafe extern "C" fn(jvmti_env: *mut jvmtiEnv, jni_env: *mut JNIEnv)>;
+    unsafe extern "system" fn(jvmti_env: *mut jvmtiEnv, jni_env: *mut JNIEnv);
 
 /* Event Callback Structure */
 
-#[derive(Clone, Copy, Debug, Default)]
+#[jni_to_union]
 #[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct jvmtiEventCallbacks {
     /*   50 : VM Initialization Event */
-    pub VMInit: jvmtiEventVMInit,
+    #[jni_added("1.0")]
+    pub VMInit: Option<jvmtiEventVMInit>,
     /*   51 : VM Death Event */
-    pub VMDeathjvmti: jvmtiEventVMDeath,
+    #[jni_added("1.0")]
+    pub VMDeath: Option<jvmtiEventVMDeath>,
     /*   52 : Thread Start */
-    pub ThreadStart: jvmtiEventThreadStart,
+    #[jni_added("1.0")]
+    pub ThreadStart: Option<jvmtiEventThreadStart>,
     /*   53 : Thread End */
-    pub ThreadEnd: jvmtiEventThreadEnd,
+    #[jni_added("1.0")]
+    pub ThreadEnd: Option<jvmtiEventThreadEnd>,
     /*   54 : Class File Load Hook */
-    pub ClassFileLoadHook: jvmtiEventClassFileLoadHook,
+    #[jni_added("1.0")]
+    pub ClassFileLoadHook: Option<jvmtiEventClassFileLoadHook>,
     /*   55 : Class Load */
-    pub ClassLoad: jvmtiEventClassLoad,
+    #[jni_added("1.0")]
+    pub ClassLoad: Option<jvmtiEventClassLoad>,
     /*   56 : Class Prepare */
-    pub ClassPrepare: jvmtiEventClassPrepare,
+    #[jni_added("1.0")]
+    pub ClassPrepare: Option<jvmtiEventClassPrepare>,
     /*   57 : VM Start Event */
-    pub VMStart: jvmtiEventVMStart,
+    #[jni_added("1.0")]
+    pub VMStart: Option<jvmtiEventVMStart>,
     /*   58 : Exception */
-    pub Exception: jvmtiEventException,
+    #[jni_added("1.0")]
+    pub Exception: Option<jvmtiEventException>,
     /*   59 : Exception Catch */
-    pub ExceptionCatch: jvmtiEventExceptionCatch,
+    #[jni_added("1.0")]
+    pub ExceptionCatch: Option<jvmtiEventExceptionCatch>,
     /*   60 : Single Step */
-    pub SingleStep: jvmtiEventSingleStep,
+    #[jni_added("1.0")]
+    pub SingleStep: Option<jvmtiEventSingleStep>,
     /*   61 : Frame Pop */
-    pub FramePop: jvmtiEventFramePop,
+    #[jni_added("1.0")]
+    pub FramePop: Option<jvmtiEventFramePop>,
     /*   62 : Breakpoint */
-    pub Breakpoint: jvmtiEventBreakpoint,
+    #[jni_added("1.0")]
+    pub Breakpoint: Option<jvmtiEventBreakpoint>,
     /*   63 : Field Access */
-    pub FieldAccess: jvmtiEventFieldAccess,
+    #[jni_added("1.0")]
+    pub FieldAccess: Option<jvmtiEventFieldAccess>,
     /*   64 : Field Modification */
-    pub FieldModification: jvmtiEventFieldModification,
+    #[jni_added("1.0")]
+    pub FieldModification: Option<jvmtiEventFieldModification>,
     /*   65 : Method Entry */
-    pub MethodEntry: jvmtiEventMethodEntry,
+    #[jni_added("1.0")]
+    pub MethodEntry: Option<jvmtiEventMethodEntry>,
     /*   66 : Method Exit */
-    pub MethodExit: jvmtiEventMethodExit,
+    #[jni_added("1.0")]
+    pub MethodExit: Option<jvmtiEventMethodExit>,
     /*   67 : Native Method Bind */
-    pub NativeMethodBind: jvmtiEventNativeMethodBind,
+    #[jni_added("1.0")]
+    pub NativeMethodBind: Option<jvmtiEventNativeMethodBind>,
     /*   68 : Compiled Method Load */
-    pub CompiledMethodLoad: jvmtiEventCompiledMethodLoad,
+    #[jni_added("1.0")]
+    pub CompiledMethodLoad: Option<jvmtiEventCompiledMethodLoad>,
     /*   69 : Compiled Method Unload */
-    pub CompiledMethodUnload: jvmtiEventCompiledMethodUnload,
+    #[jni_added("1.0")]
+    pub CompiledMethodUnload: Option<jvmtiEventCompiledMethodUnload>,
     /*   70 : Dynamic Code Generated */
-    pub DynamicCodeGenerated: jvmtiEventDynamicCodeGenerated,
+    #[jni_added("1.0")]
+    pub DynamicCodeGenerated: Option<jvmtiEventDynamicCodeGenerated>,
     /*   71 : Data Dump Request */
-    pub DataDumpRequest: jvmtiEventDataDumpRequest,
+    #[jni_added("1.0")]
+    pub DataDumpRequest: Option<jvmtiEventDataDumpRequest>,
     /*   72 */
-    pub reserved72: jvmtiEventReserved,
+    pub reserved72: Option<jvmtiEventReserved>,
     /*   73 : Monitor Wait */
-    pub MonitorWait: jvmtiEventMonitorWait,
+    #[jni_added("1.0")]
+    pub MonitorWait: Option<jvmtiEventMonitorWait>,
     /*   74 : Monitor Waited */
-    pub MonitorWaited: jvmtiEventMonitorWaited,
+    #[jni_added("1.0")]
+    pub MonitorWaited: Option<jvmtiEventMonitorWaited>,
     /*   75 : Monitor Contended Enter */
-    pub MonitorContendedEnter: jvmtiEventMonitorContendedEnter,
+    #[jni_added("1.0")]
+    pub MonitorContendedEnter: Option<jvmtiEventMonitorContendedEnter>,
     /*   76 : Monitor Contended Entered */
-    pub MonitorContendedEntered: jvmtiEventMonitorContendedEntered,
+    #[jni_added("1.0")]
+    pub MonitorContendedEntered: Option<jvmtiEventMonitorContendedEntered>,
     /*   77 */
-    pub reserved77: jvmtiEventReserved,
+    pub reserved77: Option<jvmtiEventReserved>,
     /*   78 */
-    pub reserved78: jvmtiEventReserved,
+    pub reserved78: Option<jvmtiEventReserved>,
     /*   79 */
-    pub reserved79: jvmtiEventReserved,
+    pub reserved79: Option<jvmtiEventReserved>,
     /*   80 : Resource Exhausted */
-    pub ResourceExhausted: jvmtiEventResourceExhausted,
+    #[jni_added("1.1")]
+    pub ResourceExhausted: Option<jvmtiEventResourceExhausted>,
     /*   81 : Garbage Collection Start */
-    pub GarbageCollectionStart: jvmtiEventGarbageCollectionStart,
+    #[jni_added("1.0")]
+    pub GarbageCollectionStart: Option<jvmtiEventGarbageCollectionStart>,
     /*   82 : Garbage Collection Finish */
-    pub GarbageCollectionFinish: jvmtiEventGarbageCollectionFinish,
+    #[jni_added("1.0")]
+    pub GarbageCollectionFinish: Option<jvmtiEventGarbageCollectionFinish>,
     /*   83 : Object Free */
-    pub ObjectFree: jvmtiEventObjectFree,
+    #[jni_added("1.0")]
+    pub ObjectFree: Option<jvmtiEventObjectFree>,
     /*   84 : VM Object Allocation */
-    pub VMObjectAlloc: jvmtiEventVMObjectAlloc,
+    #[jni_added("1.0")]
+    pub VMObjectAlloc: Option<jvmtiEventVMObjectAlloc>,
+    // FIXME: implement here
+    #[jni_added("reserved")]
+    pub reserved85: Option<jvmtiEventReserved>,
+    /*   86 : Sampled Object Allocation */
+    #[jni_added("11")]
+    pub SampledObjectAlloc: Option<jvmtiEventSampledObjectAlloc>,
+    /*   87 : Virtual Thread Start */
+    #[jni_added("21")]
+    pub VirtualThreadStart: Option<jvmtiEventVirtualThreadStart>,
+    /*   88 : Virtual Thread End */
+    #[jni_added("21")]
+    pub VirtualThreadEnd: Option<jvmtiEventVirtualThreadEnd>,
 }
 
-// TODO: Get rid of options
+#[jni_to_union]
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct jvmtiInterface_1_ {
+    #[jni_added("reserved")]
     pub reserved1: *mut c_void,
-    pub SetEventNotificationMode: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            mode: jvmtiEventMode,
-            event_type: jvmtiEvent,
-            event_thread: jthread,
-            ...
-        ) -> jvmtiError,
-    >,
-    pub reserved3: *mut c_void,
-    pub GetAllThreads: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            threads_count_ptr: *mut jint,
-            threads_ptr: *mut *mut jthread,
-        ) -> jvmtiError,
-    >,
-    pub SuspendThread:
-        Option<unsafe extern "C" fn(env: *mut jvmtiEnv, thread: jthread) -> jvmtiError>,
-    pub ResumeThread:
-        Option<unsafe extern "C" fn(env: *mut jvmtiEnv, thread: jthread) -> jvmtiError>,
-    pub StopThread: Option<
-        unsafe extern "C" fn(env: *mut jvmtiEnv, thread: jthread, exception: jobject) -> jvmtiError,
-    >,
+    #[jni_added("1.0")]
+    pub SetEventNotificationMode: unsafe extern "C" fn(
+        env: *mut jvmtiEnv,
+        mode: jvmtiEventMode,
+        event_type: jvmtiEvent,
+        event_thread: jthread,
+        ...
+    ) -> jvmtiError,
+    #[jni_added("9")]
+    pub GetAllModules: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        module_count_ptr: *mut jint,
+        modules_ptr: *mut *mut jthread,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetAllThreads: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        threads_count_ptr: *mut jint,
+        threads_ptr: *mut *mut jthread,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub SuspendThread: unsafe extern "system" fn(env: *mut jvmtiEnv, thread: jthread) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub ResumeThread: unsafe extern "system" fn(env: *mut jvmtiEnv, thread: jthread) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub StopThread: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        thread: jthread,
+        exception: jobject,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
     pub InterruptThread:
-        Option<unsafe extern "C" fn(env: *mut jvmtiEnv, thread: jthread) -> jvmtiError>,
-    pub GetThreadInfo: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            thread: jthread,
-            info_ptr: *mut jvmtiThreadInfo,
-        ) -> jvmtiError,
-    >,
-    pub GetOwnedMonitorInfo: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            thread: jthread,
-            owned_monitor_count_ptr: *mut jint,
-            owned_monitors_ptr: *mut *mut jobject,
-        ) -> jvmtiError,
-    >,
-    pub GetCurrentContendedMonitor: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            thread: jthread,
-            monitor_ptr: *mut jobject,
-        ) -> jvmtiError,
-    >,
-    pub RunAgentThread: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            thread: jthread,
-            _proc: jvmtiStartFunction,
-            arg: *const c_void,
-            priority: jint,
-        ) -> jvmtiError,
-    >,
-    pub GetTopThreadGroups: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            group_count_ptr: *mut jint,
-            groups_ptr: *mut *mut jthreadGroup,
-        ) -> jvmtiError,
-    >,
-    pub GetThreadGroupInfo: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            group: jthreadGroup,
-            info_ptr: *mut jvmtiThreadGroupInfo,
-        ) -> jvmtiError,
-    >,
-    pub GetThreadGroupChildren: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            group: jthreadGroup,
-            thread_count_ptr: *mut jint,
-            threads_ptr: *mut *mut jthread,
-            group_count_ptr: *mut jint,
-            groups_ptr: *mut *mut jthreadGroup,
-        ) -> jvmtiError,
-    >,
-    pub GetFrameCount: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            thread: jthread,
-            count_ptr: *mut jint,
-        ) -> jvmtiError,
-    >,
-    pub GetThreadState: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            thread: jthread,
-            thread_state_ptr: *mut jint,
-        ) -> jvmtiError,
-    >,
+        unsafe extern "system" fn(env: *mut jvmtiEnv, thread: jthread) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetThreadInfo: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        thread: jthread,
+        info_ptr: *mut jvmtiThreadInfo,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetOwnedMonitorInfo: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        thread: jthread,
+        owned_monitor_count_ptr: *mut jint,
+        owned_monitors_ptr: *mut *mut jobject,
+    ) -> jvmtiError,
+
+    #[jni_added("1.0")]
+    pub GetCurrentContendedMonitor: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        thread: jthread,
+        monitor_ptr: *mut jobject,
+    ) -> jvmtiError,
+
+    #[jni_added("1.0")]
+    pub RunAgentThread: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        thread: jthread,
+        _proc: jvmtiStartFunction,
+        arg: *const c_void,
+        priority: jint,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetTopThreadGroups: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        group_count_ptr: *mut jint,
+        groups_ptr: *mut *mut jthreadGroup,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetThreadGroupInfo: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        group: jthreadGroup,
+        info_ptr: *mut jvmtiThreadGroupInfo,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetThreadGroupChildren: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        group: jthreadGroup,
+        thread_count_ptr: *mut jint,
+        threads_ptr: *mut *mut jthread,
+        group_count_ptr: *mut jint,
+        groups_ptr: *mut *mut jthreadGroup,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetFrameCount: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        thread: jthread,
+        count_ptr: *mut jint,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetThreadState: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        thread: jthread,
+        thread_state_ptr: *mut jint,
+    ) -> jvmtiError,
+    #[jni_added("1.1")]
     pub GetCurrentThread:
-        Option<unsafe extern "C" fn(env: *mut jvmtiEnv, thread_ptr: *mut jthread) -> jvmtiError>,
-    pub GetFrameLocation: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            thread: jthread,
-            depth: jint,
-            method_ptr: *mut jmethodID,
-            location_ptr: *mut jlocation,
-        ) -> jvmtiError,
-    >,
-    pub NotifyFramePop: Option<
-        unsafe extern "C" fn(env: *mut jvmtiEnv, thread: jthread, depth: jint) -> jvmtiError,
-    >,
-    pub GetLocalObject: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            thread: jthread,
-            depth: jint,
-            slot: jint,
-            value_ptr: *mut jobject,
-        ) -> jvmtiError,
-    >,
-    pub GetLocalInt: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            thread: jthread,
-            depth: jint,
-            slot: jint,
-            value_ptr: *mut jint,
-        ) -> jvmtiError,
-    >,
-    pub GetLocalLong: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            thread: jthread,
-            depth: jint,
-            slot: jint,
-            value_ptr: *mut jlong,
-        ) -> jvmtiError,
-    >,
-    pub GetLocalFloat: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            thread: jthread,
-            depth: jint,
-            slot: jint,
-            value_ptr: *mut jfloat,
-        ) -> jvmtiError,
-    >,
-    pub GetLocalDouble: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            thread: jthread,
-            depth: jint,
-            slot: jint,
-            value_ptr: *mut jdouble,
-        ) -> jvmtiError,
-    >,
-    pub SetLocalObject: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            thread: jthread,
-            depth: jint,
-            slot: jint,
-            value: jobject,
-        ) -> jvmtiError,
-    >,
-    pub SetLocalInt: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            thread: jthread,
-            depth: jint,
-            slot: jint,
-            value: jint,
-        ) -> jvmtiError,
-    >,
-    pub SetLocalLong: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            thread: jthread,
-            depth: jint,
-            slot: jint,
-            value: jlong,
-        ) -> jvmtiError,
-    >,
-    pub SetLocalFloat: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            thread: jthread,
-            depth: jint,
-            slot: jint,
-            value: jfloat,
-        ) -> jvmtiError,
-    >,
-    pub SetLocalDouble: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            thread: jthread,
-            depth: jint,
-            slot: jint,
-            value: jdouble,
-        ) -> jvmtiError,
-    >,
-    pub CreateRawMonitor: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            name: *const c_char,
-            monitor_ptr: *mut jrawMonitorID,
-        ) -> jvmtiError,
-    >,
+        unsafe extern "system" fn(env: *mut jvmtiEnv, thread_ptr: *mut jthread) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetFrameLocation: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        thread: jthread,
+        depth: jint,
+        method_ptr: *mut jmethodID,
+        location_ptr: *mut jlocation,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub NotifyFramePop:
+        unsafe extern "system" fn(env: *mut jvmtiEnv, thread: jthread, depth: jint) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetLocalObject: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        thread: jthread,
+        depth: jint,
+        slot: jint,
+        value_ptr: *mut jobject,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetLocalInt: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        thread: jthread,
+        depth: jint,
+        slot: jint,
+        value_ptr: *mut jint,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetLocalLong: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        thread: jthread,
+        depth: jint,
+        slot: jint,
+        value_ptr: *mut jlong,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetLocalFloat: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        thread: jthread,
+        depth: jint,
+        slot: jint,
+        value_ptr: *mut jfloat,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetLocalDouble: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        thread: jthread,
+        depth: jint,
+        slot: jint,
+        value_ptr: *mut jdouble,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub SetLocalObject: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        thread: jthread,
+        depth: jint,
+        slot: jint,
+        value: jobject,
+    ) -> jvmtiError,
+
+    #[jni_added("1.0")]
+    pub SetLocalInt: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        thread: jthread,
+        depth: jint,
+        slot: jint,
+        value: jint,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub SetLocalLong: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        thread: jthread,
+        depth: jint,
+        slot: jint,
+        value: jlong,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub SetLocalFloat: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        thread: jthread,
+        depth: jint,
+        slot: jint,
+        value: jfloat,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub SetLocalDouble: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        thread: jthread,
+        depth: jint,
+        slot: jint,
+        value: jdouble,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub CreateRawMonitor: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        name: *const c_char,
+        monitor_ptr: *mut jrawMonitorID,
+    ) -> jvmtiError,
+
+    #[jni_added("1.0")]
     pub DestroyRawMonitor:
-        Option<unsafe extern "C" fn(env: *mut jvmtiEnv, monitor: jrawMonitorID) -> jvmtiError>,
+        unsafe extern "system" fn(env: *mut jvmtiEnv, monitor: jrawMonitorID) -> jvmtiError,
+    #[jni_added("1.0")]
     pub RawMonitorEnter:
-        Option<unsafe extern "C" fn(env: *mut jvmtiEnv, monitor: jrawMonitorID) -> jvmtiError>,
+        unsafe extern "system" fn(env: *mut jvmtiEnv, monitor: jrawMonitorID) -> jvmtiError,
+    #[jni_added("1.0")]
     pub RawMonitorExit:
-        Option<unsafe extern "C" fn(env: *mut jvmtiEnv, monitor: jrawMonitorID) -> jvmtiError>,
-    pub RawMonitorWait: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            monitor: jrawMonitorID,
-            millis: jlong,
-        ) -> jvmtiError,
-    >,
+        unsafe extern "system" fn(env: *mut jvmtiEnv, monitor: jrawMonitorID) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub RawMonitorWait: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        monitor: jrawMonitorID,
+        millis: jlong,
+    ) -> jvmtiError,
+
+    #[jni_added("1.0")]
     pub RawMonitorNotify:
-        Option<unsafe extern "C" fn(env: *mut jvmtiEnv, monitor: jrawMonitorID) -> jvmtiError>,
+        unsafe extern "system" fn(env: *mut jvmtiEnv, monitor: jrawMonitorID) -> jvmtiError,
+    #[jni_added("1.0")]
     pub RawMonitorNotifyAll:
-        Option<unsafe extern "C" fn(env: *mut jvmtiEnv, monitor: jrawMonitorID) -> jvmtiError>,
-    pub SetBreakpoint: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            method: jmethodID,
-            location: jlocation,
-        ) -> jvmtiError,
-    >,
-    pub ClearBreakpoint: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            method: jmethodID,
-            location: jlocation,
-        ) -> jvmtiError,
-    >,
-    pub reserved40: *mut c_void,
-    pub SetFieldAccessWatch: Option<
-        unsafe extern "C" fn(env: *mut jvmtiEnv, klass: jclass, field: jfieldID) -> jvmtiError,
-    >,
-    pub ClearFieldAccessWatch: Option<
-        unsafe extern "C" fn(env: *mut jvmtiEnv, klass: jclass, field: jfieldID) -> jvmtiError,
-    >,
-    pub SetFieldModificationWatch: Option<
-        unsafe extern "C" fn(env: *mut jvmtiEnv, klass: jclass, field: jfieldID) -> jvmtiError,
-    >,
-    pub ClearFieldModificationWatch: Option<
-        unsafe extern "C" fn(env: *mut jvmtiEnv, klass: jclass, field: jfieldID) -> jvmtiError,
-    >,
-    pub IsModifiableClass: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            klass: jclass,
-            is_modifiable_class_ptr: *mut jboolean,
-        ) -> jvmtiError,
-    >,
-    pub Allocate: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            size: jlong,
-            mem_ptr: *mut *mut c_uchar,
-        ) -> jvmtiError,
-    >,
-    pub Deallocate:
-        Option<unsafe extern "C" fn(env: *mut jvmtiEnv, mem: *mut c_uchar) -> jvmtiError>,
-    pub GetClassSignature: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            klass: jclass,
-            signature_ptr: *mut *mut c_char,
-            generic_ptr: *mut *mut c_char,
-        ) -> jvmtiError,
-    >,
-    pub GetClassStatus: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            klass: jclass,
-            status_ptr: *mut jint,
-        ) -> jvmtiError,
-    >,
-    pub GetSourceFileName: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            klass: jclass,
-            source_name_ptr: *mut *mut c_char,
-        ) -> jvmtiError,
-    >,
-    pub GetClassModifiers: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            klass: jclass,
-            modifiers_ptr: *mut jint,
-        ) -> jvmtiError,
-    >,
-    pub GetClassMethods: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            klass: jclass,
-            method_count_ptr: *mut jint,
-            methods_ptr: *mut *mut jmethodID,
-        ) -> jvmtiError,
-    >,
-    pub GetClassFields: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            klass: jclass,
-            field_count_ptr: *mut jint,
-            fields_ptr: *mut *mut jfieldID,
-        ) -> jvmtiError,
-    >,
-    pub GetImplementedInterfaces: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            klass: jclass,
-            interface_count_ptr: *mut jint,
-            interfaces_ptr: *mut *mut jclass,
-        ) -> jvmtiError,
-    >,
-    pub IsInterface: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            klass: jclass,
-            is_interface_ptr: *mut jboolean,
-        ) -> jvmtiError,
-    >,
-    pub IsArrayClass: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            klass: jclass,
-            is_array_class_ptr: *mut jboolean,
-        ) -> jvmtiError,
-    >,
-    pub GetClassLoader: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            klass: jclass,
-            classloader_ptr: *mut jobject,
-        ) -> jvmtiError,
-    >,
-    pub GetObjectHashCode: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            object: jobject,
-            hash_code_ptr: *mut jint,
-        ) -> jvmtiError,
-    >,
-    pub GetObjectMonitorUsage: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            object: jobject,
-            info_ptr: *mut jvmtiMonitorUsage,
-        ) -> jvmtiError,
-    >,
-    pub GetFieldName: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            klass: jclass,
-            field: jfieldID,
-            name_ptr: *mut *mut c_char,
-            signature_ptr: *mut *mut c_char,
-            generic_ptr: *mut *mut c_char,
-        ) -> jvmtiError,
-    >,
-    pub GetFieldDeclaringClass: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            klass: jclass,
-            field: jfieldID,
-            declaring_class_ptr: *mut jclass,
-        ) -> jvmtiError,
-    >,
-    pub GetFieldModifiers: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            klass: jclass,
-            field: jfieldID,
-            modifiers_ptr: *mut jint,
-        ) -> jvmtiError,
-    >,
-    pub IsFieldSynthetic: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            klass: jclass,
-            field: jfieldID,
-            is_synthetic_ptr: *mut jboolean,
-        ) -> jvmtiError,
-    >,
-    pub GetMethodName: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            method: jmethodID,
-            name_ptr: *mut *mut c_char,
-            signature_ptr: *mut *mut c_char,
-            generic_ptr: *mut *mut c_char,
-        ) -> jvmtiError,
-    >,
-    pub GetMethodDeclaringClass: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            method: jmethodID,
-            declaring_class_ptr: *mut jclass,
-        ) -> jvmtiError,
-    >,
-    pub GetMethodModifiers: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            method: jmethodID,
-            modifiers_ptr: *mut jint,
-        ) -> jvmtiError,
-    >,
-    pub reserved67: *mut c_void,
-    pub GetMaxLocals: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            method: jmethodID,
-            max_ptr: *mut jint,
-        ) -> jvmtiError,
-    >,
-    pub GetArgumentsSize: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            method: jmethodID,
-            size_ptr: *mut jint,
-        ) -> jvmtiError,
-    >,
-    pub GetLineNumberTable: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            method: jmethodID,
-            entry_count_ptr: *mut jint,
-            table_ptr: *mut *mut jvmtiLineNumberEntry,
-        ) -> jvmtiError,
-    >,
-    pub GetMethodLocation: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            method: jmethodID,
-            start_location_ptr: *mut jlocation,
-            end_location_ptr: *mut jlocation,
-        ) -> jvmtiError,
-    >,
-    pub GetLocalVariableTable: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            method: jmethodID,
-            entry_count_ptr: *mut jint,
-            table_ptr: *mut *mut jvmtiLocalVariableEntry,
-        ) -> jvmtiError,
-    >,
+        unsafe extern "system" fn(env: *mut jvmtiEnv, monitor: jrawMonitorID) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub SetBreakpoint: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        method: jmethodID,
+        location: jlocation,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub ClearBreakpoint: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        method: jmethodID,
+        location: jlocation,
+    ) -> jvmtiError,
+    #[jni_added("9")]
+    pub GetNamedModule: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        class_loader: jobject,
+        package_name: *const c_char,
+        module_ptr: *mut jobject,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub SetFieldAccessWatch:
+        unsafe extern "system" fn(env: *mut jvmtiEnv, klass: jclass, field: jfieldID) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub ClearFieldAccessWatch:
+        unsafe extern "system" fn(env: *mut jvmtiEnv, klass: jclass, field: jfieldID) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub SetFieldModificationWatch:
+        unsafe extern "system" fn(env: *mut jvmtiEnv, klass: jclass, field: jfieldID) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub ClearFieldModificationWatch:
+        unsafe extern "system" fn(env: *mut jvmtiEnv, klass: jclass, field: jfieldID) -> jvmtiError,
+    #[jni_added("1.1")]
+    pub IsModifiableClass: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        klass: jclass,
+        is_modifiable_class_ptr: *mut jboolean,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub Allocate: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        size: jlong,
+        mem_ptr: *mut *mut c_uchar,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub Deallocate: unsafe extern "system" fn(env: *mut jvmtiEnv, mem: *mut c_uchar) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetClassSignature: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        klass: jclass,
+        signature_ptr: *mut *mut c_char,
+        generic_ptr: *mut *mut c_char,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetClassStatus: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        klass: jclass,
+        status_ptr: *mut jint,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetSourceFileName: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        klass: jclass,
+        source_name_ptr: *mut *mut c_char,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetClassModifiers: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        klass: jclass,
+        modifiers_ptr: *mut jint,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetClassMethods: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        klass: jclass,
+        method_count_ptr: *mut jint,
+        methods_ptr: *mut *mut jmethodID,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetClassFields: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        klass: jclass,
+        field_count_ptr: *mut jint,
+        fields_ptr: *mut *mut jfieldID,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetImplementedInterfaces: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        klass: jclass,
+        interface_count_ptr: *mut jint,
+        interfaces_ptr: *mut *mut jclass,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub IsInterface: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        klass: jclass,
+        is_interface_ptr: *mut jboolean,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub IsArrayClass: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        klass: jclass,
+        is_array_class_ptr: *mut jboolean,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetClassLoader: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        klass: jclass,
+        classloader_ptr: *mut jobject,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetObjectHashCode: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        object: jobject,
+        hash_code_ptr: *mut jint,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetObjectMonitorUsage: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        object: jobject,
+        info_ptr: *mut jvmtiMonitorUsage,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetFieldName: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        klass: jclass,
+        field: jfieldID,
+        name_ptr: *mut *mut c_char,
+        signature_ptr: *mut *mut c_char,
+        generic_ptr: *mut *mut c_char,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetFieldDeclaringClass: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        klass: jclass,
+        field: jfieldID,
+        declaring_class_ptr: *mut jclass,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetFieldModifiers: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        klass: jclass,
+        field: jfieldID,
+        modifiers_ptr: *mut jint,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub IsFieldSynthetic: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        klass: jclass,
+        field: jfieldID,
+        is_synthetic_ptr: *mut jboolean,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetMethodName: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        method: jmethodID,
+        name_ptr: *mut *mut c_char,
+        signature_ptr: *mut *mut c_char,
+        generic_ptr: *mut *mut c_char,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetMethodDeclaringClass: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        method: jmethodID,
+        declaring_class_ptr: *mut jclass,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetMethodModifiers: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        method: jmethodID,
+        modifiers_ptr: *mut jint,
+    ) -> jvmtiError,
+    #[jni_added("25")]
+    pub ClearAllFramePops:
+        unsafe extern "system" fn(env: *mut jvmtiEnv, thread: jthread) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetMaxLocals: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        method: jmethodID,
+        max_ptr: *mut jint,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetArgumentsSize: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        method: jmethodID,
+        size_ptr: *mut jint,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetLineNumberTable: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        method: jmethodID,
+        entry_count_ptr: *mut jint,
+        table_ptr: *mut *mut jvmtiLineNumberEntry,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetMethodLocation: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        method: jmethodID,
+        start_location_ptr: *mut jlocation,
+        end_location_ptr: *mut jlocation,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetLocalVariableTable: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        method: jmethodID,
+        entry_count_ptr: *mut jint,
+        table_ptr: *mut *mut jvmtiLocalVariableEntry,
+    ) -> jvmtiError,
+    #[jni_added("1.1")]
     pub SetNativeMethodPrefix:
-        Option<unsafe extern "C" fn(env: *mut jvmtiEnv, prefix: *const c_char) -> jvmtiError>,
-    pub SetNativeMethodPrefixes: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            prefix_count: jint,
-            prefixes: *mut *mut c_char,
-        ) -> jvmtiError,
-    >,
-    pub GetBytecodes: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            method: jmethodID,
-            bytecode_count_ptr: *mut jint,
-            bytecodes_ptr: *mut *mut c_uchar,
-        ) -> jvmtiError,
-    >,
-    pub IsMethodNative: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            method: jmethodID,
-            is_native_ptr: *mut jboolean,
-        ) -> jvmtiError,
-    >,
-    pub IsMethodSynthetic: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            method: jmethodID,
-            is_synthetic_ptr: *mut jboolean,
-        ) -> jvmtiError,
-    >,
-    pub GetLoadedClasses: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            class_count_ptr: *mut jint,
-            classes_ptr: *mut *mut jclass,
-        ) -> jvmtiError,
-    >,
-    pub GetClassLoaderClasses: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            initiating_loader: jobject,
-            class_count_ptr: *mut jint,
-            classes_ptr: *mut *mut jclass,
-        ) -> jvmtiError,
-    >,
-    pub PopFrame: Option<unsafe extern "C" fn(env: *mut jvmtiEnv, thread: jthread) -> jvmtiError>,
-    pub ForceEarlyReturnObject: Option<
-        unsafe extern "C" fn(env: *mut jvmtiEnv, thread: jthread, value: jobject) -> jvmtiError,
-    >,
-    pub ForceEarlyReturnInt: Option<
-        unsafe extern "C" fn(env: *mut jvmtiEnv, thread: jthread, value: jint) -> jvmtiError,
-    >,
-    pub ForceEarlyReturnLong: Option<
-        unsafe extern "C" fn(env: *mut jvmtiEnv, thread: jthread, value: jlong) -> jvmtiError,
-    >,
-    pub ForceEarlyReturnFloat: Option<
-        unsafe extern "C" fn(env: *mut jvmtiEnv, thread: jthread, value: jfloat) -> jvmtiError,
-    >,
-    pub ForceEarlyReturnDouble: Option<
-        unsafe extern "C" fn(env: *mut jvmtiEnv, thread: jthread, value: jdouble) -> jvmtiError,
-    >,
+        unsafe extern "system" fn(env: *mut jvmtiEnv, prefix: *const c_char) -> jvmtiError,
+    #[jni_added("1.1")]
+    pub SetNativeMethodPrefixes: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        prefix_count: jint,
+        prefixes: *mut *mut c_char,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetBytecodes: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        method: jmethodID,
+        bytecode_count_ptr: *mut jint,
+        bytecodes_ptr: *mut *mut c_uchar,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub IsMethodNative: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        method: jmethodID,
+        is_native_ptr: *mut jboolean,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub IsMethodSynthetic: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        method: jmethodID,
+        is_synthetic_ptr: *mut jboolean,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetLoadedClasses: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        class_count_ptr: *mut jint,
+        classes_ptr: *mut *mut jclass,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetClassLoaderClasses: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        initiating_loader: jobject,
+        class_count_ptr: *mut jint,
+        classes_ptr: *mut *mut jclass,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub PopFrame: unsafe extern "system" fn(env: *mut jvmtiEnv, thread: jthread) -> jvmtiError,
+    #[jni_added("1.1")]
+    pub ForceEarlyReturnObject: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        thread: jthread,
+        value: jobject,
+    ) -> jvmtiError,
+    #[jni_added("1.1")]
+    pub ForceEarlyReturnInt:
+        unsafe extern "system" fn(env: *mut jvmtiEnv, thread: jthread, value: jint) -> jvmtiError,
+    #[jni_added("1.1")]
+    pub ForceEarlyReturnLong:
+        unsafe extern "system" fn(env: *mut jvmtiEnv, thread: jthread, value: jlong) -> jvmtiError,
+    #[jni_added("1.1")]
+    pub ForceEarlyReturnFloat:
+        unsafe extern "system" fn(env: *mut jvmtiEnv, thread: jthread, value: jfloat) -> jvmtiError,
+    #[jni_added("1.1")]
+    pub ForceEarlyReturnDouble: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        thread: jthread,
+        value: jdouble,
+    ) -> jvmtiError,
+    #[jni_added("1.1")]
     pub ForceEarlyReturnVoid:
-        Option<unsafe extern "C" fn(env: *mut jvmtiEnv, thread: jthread) -> jvmtiError>,
-    pub RedefineClasses: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            class_count: jint,
-            class_definitions: *const jvmtiClassDefinition,
-        ) -> jvmtiError,
-    >,
+        unsafe extern "system" fn(env: *mut jvmtiEnv, thread: jthread) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub RedefineClasses: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        class_count: jint,
+        class_definitions: *const jvmtiClassDefinition,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
     pub GetVersionNumber:
-        Option<unsafe extern "C" fn(env: *mut jvmtiEnv, version_ptr: *mut jint) -> jvmtiError>,
-    pub GetCapabilities: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            capabilities_ptr: *mut jvmtiCapabilities,
-        ) -> jvmtiError,
-    >,
-    pub GetSourceDebugExtension: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            klass: jclass,
-            source_debug_extension_ptr: *mut *mut c_char,
-        ) -> jvmtiError,
-    >,
-    pub IsMethodObsolete: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            method: jmethodID,
-            is_obsolete_ptr: *mut jboolean,
-        ) -> jvmtiError,
-    >,
-    pub SuspendThreadList: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            request_count: jint,
-            request_list: *const jthread,
-            results: *mut jvmtiError,
-        ) -> jvmtiError,
-    >,
-    pub ResumeThreadList: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            request_count: jint,
-            request_list: *const jthread,
-            results: *mut jvmtiError,
-        ) -> jvmtiError,
-    >,
-    pub reserved94: *mut c_void,
-    pub reserved95: *mut c_void,
-    pub reserved96: *mut c_void,
-    pub reserved97: *mut c_void,
-    pub reserved98: *mut c_void,
-    pub reserved99: *mut c_void,
-    pub GetAllStackTraces: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            max_frame_count: jint,
-            stack_info_ptr: *mut *mut jvmtiStackInfo,
-            thread_count_ptr: *mut jint,
-        ) -> jvmtiError,
-    >,
-    pub GetThreadListStackTraces: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            thread_count: jint,
-            thread_list: *const jthread,
-            max_frame_count: jint,
-            stack_info_ptr: *mut *mut jvmtiStackInfo,
-        ) -> jvmtiError,
-    >,
-    pub GetThreadLocalStorage: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            thread: jthread,
-            data_ptr: *mut *mut c_void,
-        ) -> jvmtiError,
-    >,
-    pub SetThreadLocalStorage: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            thread: jthread,
-            data: *const c_void,
-        ) -> jvmtiError,
-    >,
-    pub GetStackTrace: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            thread: jthread,
-            start_depth: jint,
-            max_frame_count: jint,
-            frame_buffer: *mut jvmtiFrameInfo,
-            count_ptr: *mut jint,
-        ) -> jvmtiError,
-    >,
+        unsafe extern "system" fn(env: *mut jvmtiEnv, version_ptr: *mut jint) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetCapabilities: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        capabilities_ptr: *mut jvmtiCapabilities,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetSourceDebugExtension: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        klass: jclass,
+        source_debug_extension_ptr: *mut *mut c_char,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub IsMethodObsolete: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        method: jmethodID,
+        is_obsolete_ptr: *mut jboolean,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub SuspendThreadList: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        request_count: jint,
+        request_list: *const jthread,
+        results: *mut jvmtiError,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub ResumeThreadList: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        request_count: jint,
+        request_list: *const jthread,
+        results: *mut jvmtiError,
+    ) -> jvmtiError,
+    #[jni_added("9")]
+    pub AddModuleReads: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        module: jobject,
+        to_module: jobject,
+    ) -> jvmtiError,
+    #[jni_added("9")]
+    pub AddModuleExports: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        module: jobject,
+        pkg_name: *const c_char,
+        to_module: jobject,
+    ) -> jvmtiError,
+    #[jni_added("9")]
+    pub AddModuleOpens: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        module: jobject,
+        pkg_name: *const c_char,
+        to_module: jobject,
+    ) -> jvmtiError,
+    #[jni_added("9")]
+    pub AddModuleUses: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        module: jobject,
+        service: jclass,
+    ) -> jvmtiError,
+    #[jni_added("9")]
+    pub AddModuleProvides: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        module: jobject,
+        service: jclass,
+        impl_class: jclass,
+    ) -> jvmtiError,
+    #[jni_added("9")]
+    pub IsModifiableModule: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        module: jobject,
+        is_modifiable_module_ptr: *mut jboolean,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetAllStackTraces: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        max_frame_count: jint,
+        stack_info_ptr: *mut *mut jvmtiStackInfo,
+        thread_count_ptr: *mut jint,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetThreadListStackTraces: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        thread_count: jint,
+        thread_list: *const jthread,
+        max_frame_count: jint,
+        stack_info_ptr: *mut *mut jvmtiStackInfo,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetThreadLocalStorage: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        thread: jthread,
+        data_ptr: *mut *mut c_void,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub SetThreadLocalStorage: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        thread: jthread,
+        data: *const c_void,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetStackTrace: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        thread: jthread,
+        start_depth: jint,
+        max_frame_count: jint,
+        frame_buffer: *mut jvmtiFrameInfo,
+        count_ptr: *mut jint,
+    ) -> jvmtiError,
+    #[jni_added("reserved")]
     pub reserved105: *mut c_void,
-    pub GetTag: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            object: jobject,
-            tag_ptr: *mut jlong,
-        ) -> jvmtiError,
-    >,
+    #[jni_added("1.0")]
+    pub GetTag: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        object: jobject,
+        tag_ptr: *mut jlong,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
     pub SetTag:
-        Option<unsafe extern "C" fn(env: *mut jvmtiEnv, object: jobject, tag: jlong) -> jvmtiError>,
-    pub ForceGarbageCollection: Option<unsafe extern "C" fn(env: *mut jvmtiEnv) -> jvmtiError>,
-    pub IterateOverObjectsReachableFromObject: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            object: jobject,
-            object_reference_callback: jvmtiObjectReferenceCallback,
-            user_data: *const c_void,
-        ) -> jvmtiError,
-    >,
-    pub IterateOverReachableObjects: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            heap_root_callback: jvmtiHeapRootCallback,
-            stack_ref_callback: jvmtiStackReferenceCallback,
-            object_ref_callback: jvmtiObjectReferenceCallback,
-            user_data: *const c_void,
-        ) -> jvmtiError,
-    >,
-    pub IterateOverHeap: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            object_filter: jvmtiHeapObjectFilter,
-            heap_object_callback: jvmtiHeapObjectCallback,
-            user_data: *const c_void,
-        ) -> jvmtiError,
-    >,
-    pub IterateOverInstancesOfClass: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            klass: jclass,
-            object_filter: jvmtiHeapObjectFilter,
-            heap_object_callback: jvmtiHeapObjectCallback,
-            user_data: *const c_void,
-        ) -> jvmtiError,
-    >,
+        unsafe extern "system" fn(env: *mut jvmtiEnv, object: jobject, tag: jlong) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub ForceGarbageCollection: unsafe extern "system" fn(env: *mut jvmtiEnv) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub IterateOverObjectsReachableFromObject: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        object: jobject,
+        object_reference_callback: jvmtiObjectReferenceCallback,
+        user_data: *const c_void,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub IterateOverReachableObjects: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        heap_root_callback: jvmtiHeapRootCallback,
+        stack_ref_callback: jvmtiStackReferenceCallback,
+        object_ref_callback: jvmtiObjectReferenceCallback,
+        user_data: *const c_void,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub IterateOverHeap: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        object_filter: jvmtiHeapObjectFilter,
+        heap_object_callback: jvmtiHeapObjectCallback,
+        user_data: *const c_void,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub IterateOverInstancesOfClass: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        klass: jclass,
+        object_filter: jvmtiHeapObjectFilter,
+        heap_object_callback: jvmtiHeapObjectCallback,
+        user_data: *const c_void,
+    ) -> jvmtiError,
+    #[jni_added("reserved")]
     pub reserved113: *mut c_void,
-    pub GetObjectsWithTags: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            tag_count: jint,
-            tags: *const jlong,
-            count_ptr: *mut jint,
-            object_result_ptr: *mut *mut jobject,
-            tag_result_ptr: *mut *mut jlong,
-        ) -> jvmtiError,
-    >,
-    pub FollowReferences: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            heap_filter: jint,
-            klass: jclass,
-            initial_object: jobject,
-            callbacks: *const jvmtiHeapCallbacks,
-            user_data: *const c_void,
-        ) -> jvmtiError,
-    >,
-    pub IterateThroughHeap: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            heap_filter: jint,
-            klass: jclass,
-            callbacks: *const jvmtiHeapCallbacks,
-            user_data: *const c_void,
-        ) -> jvmtiError,
-    >,
+    #[jni_added("1.0")]
+    pub GetObjectsWithTags: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        tag_count: jint,
+        tags: *const jlong,
+        count_ptr: *mut jint,
+        object_result_ptr: *mut *mut jobject,
+        tag_result_ptr: *mut *mut jlong,
+    ) -> jvmtiError,
+    #[jni_added("1.1")]
+    pub FollowReferences: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        heap_filter: jint,
+        klass: jclass,
+        initial_object: jobject,
+        callbacks: *const jvmtiHeapCallbacks,
+        user_data: *const c_void,
+    ) -> jvmtiError,
+    #[jni_added("1.1")]
+    pub IterateThroughHeap: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        heap_filter: jint,
+        klass: jclass,
+        callbacks: *const jvmtiHeapCallbacks,
+        user_data: *const c_void,
+    ) -> jvmtiError,
+    #[jni_added("reserved")]
     pub reserved117: *mut c_void,
-    pub reserved118: *mut c_void,
-    pub reserved119: *mut c_void,
-    pub SetJNIFunctionTable: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            function_table: *const JNINativeInterface_,
-        ) -> jvmtiError,
-    >,
-    pub GetJNIFunctionTable: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            function_table: *mut *mut JNINativeInterface_,
-        ) -> jvmtiError,
-    >,
-    pub SetEventCallbacks: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            callbacks: *const jvmtiEventCallbacks,
-            size_of_callbacks: jint,
-        ) -> jvmtiError,
-    >,
+    #[jni_added("21")]
+    pub SuspendAllVirtualThreads: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        except_count: jint,
+        except_list: *const jthread,
+    ) -> jvmtiError,
+    #[jni_added("21")]
+    pub ResumeAllVirtualThreads: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        except_count: jint,
+        except_list: *const jthread,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub SetJNIFunctionTable: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        function_table: *const JNINativeInterface_,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetJNIFunctionTable: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        function_table: *mut *mut JNINativeInterface_,
+    ) -> jvmtiError,
+
+    #[jni_added("1.0")]
+    pub SetEventCallbacks: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        callbacks: *const jvmtiEventCallbacks,
+        size_of_callbacks: jint,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
     pub GenerateEvents:
-        Option<unsafe extern "C" fn(env: *mut jvmtiEnv, event_type: jvmtiEvent) -> jvmtiError>,
-    pub GetExtensionFunctions: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            extension_count_ptr: *mut jint,
-            extensions: *mut *mut jvmtiExtensionFunctionInfo,
-        ) -> jvmtiError,
-    >,
-    pub GetExtensionEvents: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            extension_count_ptr: *mut jint,
-            extensions: *mut *mut jvmtiExtensionEventInfo,
-        ) -> jvmtiError,
-    >,
-    pub SetExtensionEventCallback: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            extension_event_index: jint,
-            callback: jvmtiExtensionEvent,
-        ) -> jvmtiError,
-    >,
-    pub DisposeEnvironment: Option<unsafe extern "C" fn(env: *mut jvmtiEnv) -> jvmtiError>,
-    pub GetErrorName: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            error: jvmtiError,
-            name_ptr: *mut *mut c_char,
-        ) -> jvmtiError,
-    >,
-    pub GetJLocationFormat: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            format_ptr: *mut jvmtiJlocationFormat,
-        ) -> jvmtiError,
-    >,
-    pub GetSystemProperties: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            count_ptr: *mut jint,
-            property_ptr: *mut *mut *mut c_char,
-        ) -> jvmtiError,
-    >,
-    pub GetSystemProperty: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            property: *const c_char,
-            value_ptr: *mut *mut c_char,
-        ) -> jvmtiError,
-    >,
-    pub SetSystemProperty: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            property: *const c_char,
-            value: *const c_char,
-        ) -> jvmtiError,
-    >,
+        unsafe extern "system" fn(env: *mut jvmtiEnv, event_type: jvmtiEvent) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetExtensionFunctions: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        extension_count_ptr: *mut jint,
+        extensions: *mut *mut jvmtiExtensionFunctionInfo,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetExtensionEvents: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        extension_count_ptr: *mut jint,
+        extensions: *mut *mut jvmtiExtensionEventInfo,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub SetExtensionEventCallback: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        extension_event_index: jint,
+        callback: jvmtiExtensionEvent,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub DisposeEnvironment: unsafe extern "system" fn(env: *mut jvmtiEnv) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetErrorName: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        error: jvmtiError,
+        name_ptr: *mut *mut c_char,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetJLocationFormat: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        format_ptr: *mut jvmtiJlocationFormat,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetSystemProperties: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        count_ptr: *mut jint,
+        property_ptr: *mut *mut *mut c_char,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetSystemProperty: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        property: *const c_char,
+        value_ptr: *mut *mut c_char,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub SetSystemProperty: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        property: *const c_char,
+        value: *const c_char,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
     pub GetPhase:
-        Option<unsafe extern "C" fn(env: *mut jvmtiEnv, phase_ptr: *mut jvmtiPhase) -> jvmtiError>,
-    pub GetCurrentThreadCpuTimerInfo: Option<
-        unsafe extern "C" fn(env: *mut jvmtiEnv, info_ptr: *mut jvmtiTimerInfo) -> jvmtiError,
-    >,
+        unsafe extern "system" fn(env: *mut jvmtiEnv, phase_ptr: *mut jvmtiPhase) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetCurrentThreadCpuTimerInfo:
+        unsafe extern "system" fn(env: *mut jvmtiEnv, info_ptr: *mut jvmtiTimerInfo) -> jvmtiError,
+    #[jni_added("1.0")]
     pub GetCurrentThreadCpuTime:
-        Option<unsafe extern "C" fn(env: *mut jvmtiEnv, nanos_ptr: *mut jlong) -> jvmtiError>,
-    pub GetThreadCpuTimerInfo: Option<
-        unsafe extern "C" fn(env: *mut jvmtiEnv, info_ptr: *mut jvmtiTimerInfo) -> jvmtiError,
-    >,
-    pub GetThreadCpuTime: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            thread: jthread,
-            nanos_ptr: *mut jlong,
-        ) -> jvmtiError,
-    >,
-    pub GetTimerInfo: Option<
-        unsafe extern "C" fn(env: *mut jvmtiEnv, info_ptr: *mut jvmtiTimerInfo) -> jvmtiError,
-    >,
-    pub GetTime:
-        Option<unsafe extern "C" fn(env: *mut jvmtiEnv, nanos_ptr: *mut jlong) -> jvmtiError>,
-    pub GetPotentialCapabilities: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            capabilities_ptr: *mut jvmtiCapabilities,
-        ) -> jvmtiError,
-    >,
+        unsafe extern "system" fn(env: *mut jvmtiEnv, nanos_ptr: *mut jlong) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetThreadCpuTimerInfo:
+        unsafe extern "system" fn(env: *mut jvmtiEnv, info_ptr: *mut jvmtiTimerInfo) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetThreadCpuTime: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        thread: jthread,
+        nanos_ptr: *mut jlong,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetTimerInfo:
+        unsafe extern "system" fn(env: *mut jvmtiEnv, info_ptr: *mut jvmtiTimerInfo) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetTime: unsafe extern "system" fn(env: *mut jvmtiEnv, nanos_ptr: *mut jlong) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetPotentialCapabilities: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        capabilities_ptr: *mut jvmtiCapabilities,
+    ) -> jvmtiError,
+    #[jni_added("reserved")]
     pub reserved141: *mut c_void,
-    pub AddCapabilities: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            capabilities_ptr: *const jvmtiCapabilities,
-        ) -> jvmtiError,
-    >,
-    pub RelinquishCapabilities: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            capabilities_ptr: *const jvmtiCapabilities,
-        ) -> jvmtiError,
-    >,
-    pub GetAvailableProcessors: Option<
-        unsafe extern "C" fn(env: *mut jvmtiEnv, processor_count_ptr: *mut jint) -> jvmtiError,
-    >,
-    pub GetClassVersionNumbers: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            klass: jclass,
-            minor_version_ptr: *mut jint,
-            major_version_ptr: *mut jint,
-        ) -> jvmtiError,
-    >,
-    pub GetConstantPool: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            klass: jclass,
-            constant_pool_count_ptr: *mut jint,
-            constant_pool_byte_count_ptr: *mut jint,
-            constant_pool_bytes_ptr: *mut *mut c_uchar,
-        ) -> jvmtiError,
-    >,
+    #[jni_added("1.0")]
+    pub AddCapabilities: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        capabilities_ptr: *const jvmtiCapabilities,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub RelinquishCapabilities: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        capabilities_ptr: *const jvmtiCapabilities,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetAvailableProcessors:
+        unsafe extern "system" fn(env: *mut jvmtiEnv, processor_count_ptr: *mut jint) -> jvmtiError,
+    #[jni_added("1.1")]
+    pub GetClassVersionNumbers: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        klass: jclass,
+        minor_version_ptr: *mut jint,
+        major_version_ptr: *mut jint,
+    ) -> jvmtiError,
+    #[jni_added("1.1")]
+    pub GetConstantPool: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        klass: jclass,
+        constant_pool_count_ptr: *mut jint,
+        constant_pool_byte_count_ptr: *mut jint,
+        constant_pool_bytes_ptr: *mut *mut c_uchar,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
     pub GetEnvironmentLocalStorage:
-        Option<unsafe extern "C" fn(env: *mut jvmtiEnv, data_ptr: *mut *mut c_void) -> jvmtiError>,
+        unsafe extern "system" fn(env: *mut jvmtiEnv, data_ptr: *mut *mut c_void) -> jvmtiError,
+    #[jni_added("1.0")]
     pub SetEnvironmentLocalStorage:
-        Option<unsafe extern "C" fn(env: *mut jvmtiEnv, data: *const c_void) -> jvmtiError>,
+        unsafe extern "system" fn(env: *mut jvmtiEnv, data: *const c_void) -> jvmtiError,
+    #[jni_added("1.0")]
     pub AddToBootstrapClassLoaderSearch:
-        Option<unsafe extern "C" fn(env: *mut jvmtiEnv, segment: *const c_char) -> jvmtiError>,
-    pub SetVerboseFlag: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            flag: jvmtiVerboseFlag,
-            value: jboolean,
-        ) -> jvmtiError,
-    >,
+        unsafe extern "system" fn(env: *mut jvmtiEnv, segment: *const c_char) -> jvmtiError,
+    #[jni_added("1.1")]
+    pub SetVerboseFlag: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        flag: jvmtiVerboseFlag,
+        value: jboolean,
+    ) -> jvmtiError,
+    #[jni_added("1.1")]
     pub AddToSystemClassLoaderSearch:
-        Option<unsafe extern "C" fn(env: *mut jvmtiEnv, segment: *const c_char) -> jvmtiError>,
-    pub RetransformClasses: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            class_count: jint,
-            classes: *const jclass,
-        ) -> jvmtiError,
-    >,
-    pub GetOwnedMonitorStackDepthInfo: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            thread: jthread,
-            monitor_info_count_ptr: *mut jint,
-            monitor_info_ptr: *mut *mut jvmtiMonitorStackDepthInfo,
-        ) -> jvmtiError,
-    >,
-    pub GetObjectSize: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            object: jobject,
-            size_ptr: *mut jlong,
-        ) -> jvmtiError,
-    >,
-    pub GetLocalInstance: Option<
-        unsafe extern "C" fn(
-            env: *mut jvmtiEnv,
-            thread: jthread,
-            depth: jint,
-            value_ptr: *mut jobject,
-        ) -> jvmtiError,
-    >,
+        unsafe extern "system" fn(env: *mut jvmtiEnv, segment: *const c_char) -> jvmtiError,
+    #[jni_added("1.1")]
+    pub RetransformClasses: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        class_count: jint,
+        classes: *const jclass,
+    ) -> jvmtiError,
+    #[jni_added("1.1")]
+    pub GetOwnedMonitorStackDepthInfo: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        thread: jthread,
+        monitor_info_count_ptr: *mut jint,
+        monitor_info_ptr: *mut *mut jvmtiMonitorStackDepthInfo,
+    ) -> jvmtiError,
+    #[jni_added("1.0")]
+    pub GetObjectSize: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        object: jobject,
+        size_ptr: *mut jlong,
+    ) -> jvmtiError,
+    #[jni_added("1.2")]
+    pub GetLocalInstance: unsafe extern "system" fn(
+        env: *mut jvmtiEnv,
+        thread: jthread,
+        depth: jint,
+        value_ptr: *mut jobject,
+    ) -> jvmtiError,
+    #[jni_added("11")]
+    pub SetHeapSamplingInterval:
+        unsafe extern "system" fn(env: *mut jvmtiEnv, sampling_interval: jint) -> jvmtiError,
 }
 
-#[derive(Clone, Copy, Debug)]
 #[repr(C)]
+#[derive(Copy, Debug)]
 pub struct _jvmtiEnv {
     pub functions: *const jvmtiInterface_1_,
+}
+
+impl Clone for _jvmtiEnv {
+    fn clone(&self) -> Self {
+        *self
+    }
 }

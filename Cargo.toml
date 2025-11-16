@@ -1,13 +1,15 @@
 [package]
-description = "Rust bindings to the JVMTI"
+name = "jvmti-sys"
+version = "0.1.0"
+authors = ["Aslan Gurtsiev"]
+description = "Rust bindings to the jvmti.h"
 keywords = ["ffi", "jvmti", "java"]
 license = "MIT OR Apache-2.0"
 categories = ["external-ffi-bindings"]
-name = "jvmti-sys"
-version = "0.0.1"
 edition = "2021"
 
 
 [dependencies]
-jni-sys = "~0.3"
+jni-sys = "0.4"
 bitflags = "2"
+jni-sys-macros = "0.1"
