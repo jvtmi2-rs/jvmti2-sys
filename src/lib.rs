@@ -1087,7 +1087,6 @@ pub struct jvmtiEventCallbacks {
     /*   84 : VM Object Allocation */
     #[jni_added("1.0")]
     pub VMObjectAlloc: Option<jvmtiEventVMObjectAlloc>,
-    // FIXME: implement here
     #[jni_added("reserved")]
     pub reserved85: Option<jvmtiEventReserved>,
     /*   86 : Sampled Object Allocation */
