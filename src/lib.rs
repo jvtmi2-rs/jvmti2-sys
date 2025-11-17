@@ -10,6 +10,8 @@ use jni_sys::{
 };
 use jni_sys_macros::jni_to_union;
 
+pub mod jvmticmlr;
+
 pub const JVMTI_VERSION_1: jint = 0x30010000;
 pub const JVMTI_VERSION_1_0: jint = 0x30010000;
 pub const JVMTI_VERSION_1_1: jint = 0x30010100;
@@ -149,11 +151,11 @@ pub enum jvmtiIterationControl {
 }
 /* Class Status Flags */
 pub const JVMTI_CLASS_STATUS_VERIFIED: c_uint = 1;
-const JVMTI_CLASS_STATUS_PREPARED: c_uint = 2;
-const JVMTI_CLASS_STATUS_INITIALIZED: c_uint = 4;
-const JVMTI_CLASS_STATUS_ERROR: c_uint = 8;
-const JVMTI_CLASS_STATUS_ARRAY: c_uint = 16;
-const JVMTI_CLASS_STATUS_PRIMITIVE: c_uint = 32;
+pub const JVMTI_CLASS_STATUS_PREPARED: c_uint = 2;
+pub const JVMTI_CLASS_STATUS_INITIALIZED: c_uint = 4;
+pub const JVMTI_CLASS_STATUS_ERROR: c_uint = 8;
+pub const JVMTI_CLASS_STATUS_ARRAY: c_uint = 16;
+pub const JVMTI_CLASS_STATUS_PRIMITIVE: c_uint = 32;
 
 /* Event Enable/Disable */
 #[derive(Clone, Copy, Debug)]
@@ -1053,6 +1055,7 @@ pub struct jvmtiEventCallbacks {
     #[jni_added("1.0")]
     pub DataDumpRequest: Option<jvmtiEventDataDumpRequest>,
     /*   72 */
+    #[jni_added("reserved")]
     pub reserved72: Option<jvmtiEventReserved>,
     /*   73 : Monitor Wait */
     #[jni_added("1.0")]
@@ -1067,10 +1070,13 @@ pub struct jvmtiEventCallbacks {
     #[jni_added("1.0")]
     pub MonitorContendedEntered: Option<jvmtiEventMonitorContendedEntered>,
     /*   77 */
+    #[jni_added("reserved")]
     pub reserved77: Option<jvmtiEventReserved>,
     /*   78 */
+    #[jni_added("reserved")]
     pub reserved78: Option<jvmtiEventReserved>,
     /*   79 */
+    #[jni_added("reserved")]
     pub reserved79: Option<jvmtiEventReserved>,
     /*   80 : Resource Exhausted */
     #[jni_added("1.1")]
