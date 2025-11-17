@@ -1,5 +1,5 @@
 [package]
-name = "jvmti-sys"
+name = "jvmti2-sys"
 version = "0.1.0"
 authors = ["Aslan Gurtsiev"]
 description = "Rust bindings to the jvmti.h"
