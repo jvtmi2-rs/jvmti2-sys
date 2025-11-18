@@ -1,3 +1,7 @@
+![docs.rs](https://img.shields.io/docsrs/jvmti2-sys)
+![Crates.io Version](https://img.shields.io/crates/v/jvmti2-sys)
+
+
 # jvmti-sys
 
 Rust bindings corresponding to [JVMTI](https://docs.oracle.com/javase/8/docs/technotes/guides/jvmti/)
