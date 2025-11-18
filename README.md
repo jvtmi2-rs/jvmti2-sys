@@ -1,6 +1,6 @@
-![docs.rs](https://img.shields.io/docsrs/jvmti2-sys)
-![Crates.io Version](https://img.shields.io/crates/v/jvmti2-sys)
-
+[![docs.rs](https://img.shields.io/docsrs/jvmti2-sys)](https://docs.rs/jvmti2-sys/latest/jvmti2_sys)
+[![Crates.io Version](https://img.shields.io/crates/v/jvmti2-sys)
+](https://crates.io/crates/jvmti2-sys)
 
 # jvmti-sys
 
