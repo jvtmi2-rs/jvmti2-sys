@@ -1,6 +1,6 @@
 [package]
 name = "jvmti2-sys"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Aslan Gurtsiev"]
 description = "Rust bindings to the jvmti.h"
 repository = "https://github.com/jvtmi2-rs/jvmti2-sys"
@@ -13,4 +13,4 @@ edition = "2021"
 [dependencies]
 jni-sys = "0.4"
 bitflags = "2"
-jni-sys-macros = "0.1"
+jni-sys-macros = "0.4"
