@@ -1,6 +1,6 @@
 [package]
 name = "jvmti2-sys"
-version = "0.1.1"
+version = "0.1.2"
 authors = ["Aslan Gurtsiev"]
 description = "Rust bindings to the jvmti.h"
 repository = "https://github.com/jvtmi2-rs/jvmti2-sys"

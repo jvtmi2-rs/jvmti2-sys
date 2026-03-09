@@ -310,6 +310,7 @@ pub enum jvmtiError {
     JVMTI_ERROR_UNSUPPORTED_REDEFINITION_CLASS_MODIFIERS_CHANGED = 70,
     JVMTI_ERROR_UNSUPPORTED_REDEFINITION_METHOD_MODIFIERS_CHANGED = 71,
     JVMTI_ERROR_UNSUPPORTED_REDEFINITION_CLASS_ATTRIBUTE_CHANGED = 72,
+    JVMTI_ERROR_UNSUPPORTED_OPERATION = 73,
     JVMTI_ERROR_UNMODIFIABLE_CLASS = 79,
     JVMTI_ERROR_UNMODIFIABLE_MODULE = 80,
     JVMTI_ERROR_NOT_AVAILABLE = 98,
@@ -582,9 +583,7 @@ pub union _jvmtiHeapReferenceInfo {
 }
 
 impl core::fmt::Debug for _jvmtiHeapReferenceInfo {
-    // TODO: think about how can this be represented better
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let field = unsafe { self.field };
         f.debug_struct("_jvmtiHeapReferenceInfo")
             .field("field", unsafe { &self.field })
             .field("array", unsafe { &self.array })
@@ -798,7 +797,7 @@ pub type jvmtiEventClassPrepare = unsafe extern "system" fn(
 
 pub type jvmtiEventCompiledMethodLoad = unsafe extern "system" fn(
     jvmti_env: *mut jvmtiEnv,
-    jni_env: *mut JNIEnv,
+    method: jmethodID,
     code_size: jint,
     code_addr: *const c_void,
     map_length: jint,
@@ -924,7 +923,7 @@ pub type jvmtiEventNativeMethodBind = unsafe extern "system" fn(
     jvmti_env: *mut jvmtiEnv,
     jni_env: *mut JNIEnv,
     thread: jthread,
-    method: *mut c_void,
+    method: jmethodID,
     address: *mut c_void,
     new_address_ptr: *mut *mut c_void,
 );
